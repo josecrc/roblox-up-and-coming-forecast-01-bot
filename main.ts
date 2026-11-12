@@ -8,9 +8,9 @@ import { join } from 'node:path';
 
 const INPUT_DIR = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-const SCALE = 1.6;
-const UNNAMED_SHARE = 0.25;
-const MAX_CANDIDATES = 35;
+const SCALE = 4.0;
+const UNNAMED_SHARE = 0.35;
+const MAX_CANDIDATES = 45;
 const DAY_MS = 86_400_000;
 
 interface ChartRow {
