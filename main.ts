@@ -8,9 +8,9 @@ import { join } from 'node:path';
 
 const INPUT_DIR = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-const SCALE = 4.0;
-const UNNAMED_SHARE = 0.35;
-const MAX_CANDIDATES = 45;
+const SIGMA = 5.5;
+const UNNAMED_SHARE = 0.30;
+const MAX_CANDIDATES = 50;
 const DAY_MS = 86_400_000;
 
 interface ChartRow {
@@ -91,7 +91,7 @@ const probabilities: Array<{ universe_id: number; place: number; p: number }> = 
 for (let place = 1; place <= task.places; place++) {
   const weights = candidates.map((c) => ({
     universe_id: c.universe_id,
-    w: Math.exp(-Math.abs(place - c.predRank) / SCALE),
+    w: Math.exp(-0.5 * ((place - c.predRank) / SIGMA) ** 2),
   }));
   const totalW = weights.reduce((acc, x) => acc + x.w, 0);
   const scale = (1 - UNNAMED_SHARE) / (totalW || 1);
