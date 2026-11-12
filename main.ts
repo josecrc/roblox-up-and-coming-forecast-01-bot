@@ -1,21 +1,22 @@
 /**
- * Probabilistic forecaster for Roblox Up-and-Coming top 10.
- * Uses recent rank momentum, 28-day age-out filtering, and a Gaussian kernel
- * with a 0.30 unnamed probability mass to hedge against chart churn.
+ * Calibrated probabilistic forecaster for Roblox Up-and-Coming top 10.
+ * Combines rank momentum, player growth, 28-day age-out filtering, and a
+ * sharp Laplace kernel (scale=1.6) with 0.25 unnamed mass.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const INPUT_DIR = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-const SIGMA = 5.5;
-const UNNAMED_SHARE = 0.3;
-const MAX_CANDIDATES = 50;
+const SCALE = 1.6;
+const UNNAMED_SHARE = 0.25;
+const MAX_CANDIDATES = 35;
 const DAY_MS = 86_400_000;
 
 interface ChartRow {
   rank: number;
   universe_id: number;
+  playing?: number | null;
 }
 
 interface GameDetails {
@@ -43,14 +44,23 @@ const last = snapshots[snapshots.length - 1]!;
 const windowFromMs = task.window?.from ? Date.parse(task.window.from) : NaN;
 
 const rankHistory = new Map<number, number[]>();
+const playHistory = new Map<number, number[]>();
 for (const snap of snapshots) {
   for (const row of snap.up_and_coming) {
-    let arr = rankHistory.get(row.universe_id);
-    if (arr === undefined) {
-      arr = [];
-      rankHistory.set(row.universe_id, arr);
+    let rArr = rankHistory.get(row.universe_id);
+    if (rArr === undefined) {
+      rArr = [];
+      rankHistory.set(row.universe_id, rArr);
     }
-    arr.push(row.rank);
+    rArr.push(row.rank);
+    if (typeof row.playing === 'number' && row.playing > 0) {
+      let pArr = playHistory.get(row.universe_id);
+      if (pArr === undefined) {
+        pArr = [];
+        playHistory.set(row.universe_id, pArr);
+      }
+      pArr.push(row.playing);
+    }
   }
 }
 
@@ -62,12 +72,18 @@ const candidates = [...last.up_and_coming]
     const created = last.details[String(r.universe_id)]?.created;
     if (!created) return true;
     const ageDays = (windowFromMs - Date.parse(created)) / DAY_MS;
-    return ageDays < 27.5;
+    return ageDays < 26.0;
   })
   .map((r) => {
-    const hist = rankHistory.get(r.universe_id) ?? [r.rank];
-    const vel = (r.rank - hist[0]!) / Math.max(1, hist.length - 1);
-    const predRank = Math.max(1, r.rank + 0.5 * vel);
+    const rHist = rankHistory.get(r.universe_id) ?? [r.rank];
+    const rankVel = (r.rank - rHist[0]!) / Math.max(1, rHist.length - 1);
+    const pHist = playHistory.get(r.universe_id);
+    let playBoost = 0;
+    if (pHist && pHist.length >= 2 && pHist[0]! > 0) {
+      const growth = (pHist[pHist.length - 1]! - pHist[0]!) / pHist[0]!;
+      playBoost = Math.max(-2, Math.min(2, growth * 2));
+    }
+    const predRank = Math.max(1, r.rank + 0.35 * rankVel - playBoost);
     return { universe_id: r.universe_id, predRank };
   });
 
@@ -75,7 +91,7 @@ const probabilities: Array<{ universe_id: number; place: number; p: number }> = 
 for (let place = 1; place <= task.places; place++) {
   const weights = candidates.map((c) => ({
     universe_id: c.universe_id,
-    w: Math.exp(-0.5 * ((place - c.predRank) / SIGMA) ** 2),
+    w: Math.exp(-Math.abs(place - c.predRank) / SCALE),
   }));
   const totalW = weights.reduce((acc, x) => acc + x.w, 0);
   const scale = (1 - UNNAMED_SHARE) / (totalW || 1);
